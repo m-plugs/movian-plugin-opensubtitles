@@ -1,0 +1,123 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+      prerelease:
+        description: "Mark as pre-release?"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # needed to push tag + create release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # needed for tags / history
+
+      - name: Extract plugin id & current version
+        id: meta
+        run: |
+          # Prefer "id" from plugin.json
+          if [ -f plugin.json ]; then
+            ID=$(jq -r '.id' plugin.json)
+            VERSION=$(jq -r '.version' plugin.json)
+          else
+            echo "plugin.json not found!"
+            exit 1
+          fi
+
+          # Fallback: extract from repo name movian-plugin-<id>
+          if [ -z "$ID" ] || [ "$ID" = "null" ]; then
+            ID=$(echo "${{ github.event.repository.name }}" | sed -E 's/^movian-plugin-//')
+          fi
+
+          echo "id=$ID" >> $GITHUB_OUTPUT
+          echo "current_version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Plugin ID: $ID  |  Current version: $VERSION"
+
+      - name: Bump version
+        id: bump
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const current = '${{ steps.meta.outputs.current_version }}';
+            const [major, minor, patch] = current.split('.').map(Number);
+            const type = '${{ inputs.bump }}';
+
+            let next;
+            if (type === 'major') next = `${major + 1}.0.0`;
+            else if (type === 'minor') next = `${major}.${minor + 1}.0`;
+            else next = `${major}.${minor}.${patch + 1}`;
+
+            core.setOutput('new_version', next);
+            console.log(`Bumping ${current} → ${next}`);
+
+      - name: Update plugin.json
+        run: |
+          NEW_VERSION="${{ steps.bump.outputs.new_version }}"
+          jq --arg v "$NEW_VERSION" '.version = $v' plugin.json > plugin.json.tmp
+          mv plugin.json.tmp plugin.json
+          echo "Updated plugin.json to version $NEW_VERSION"
+          cat plugin.json
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add plugin.json
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}"
+          git push
+
+      - name: Create and push tag
+        run: |
+          VERSION="${{ steps.bump.outputs.new_version }}"
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "$VERSION"
+
+      - name: Create zip asset
+        id: zip
+        run: |
+          ID="${{ steps.meta.outputs.id }}"
+          VERSION="${{ steps.bump.outputs.new_version }}"
+          ZIP_NAME="${ID}-${VERSION}.zip"
+
+          # Zip everything except .git and the workflow itself (optional exclusions)
+          zip -r "$ZIP_NAME" . \
+            -x "*.git*" \
+            -x ".github/*" \
+            -x "*.zip"
+
+          echo "zip_name=$ZIP_NAME" >> $GITHUB_OUTPUT
+          ls -lh "$ZIP_NAME"
+
+      - name: Create GitHub Release + upload asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.bump.outputs.new_version }}
+          name: ${{ steps.meta.outputs.id }} ${{ steps.bump.outputs.new_version }}
+          body: |
+            Movian plugin release `${{ steps.meta.outputs.id }}` v${{ steps.bump.outputs.new_version }}
+
+            ### Download
+            [${{ steps.zip.outputs.zip_name }}](https://github.com/${{ github.repository }}/releases/download/${{ steps.bump.outputs.new_version }}/${{ steps.zip.outputs.zip_name }})
+          files: ${{ steps.zip.outputs.zip_name }}
+          prerelease: ${{ inputs.prerelease }}
+          draft: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
