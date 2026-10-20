@@ -1,0 +1,15 @@
+{
+  "type": "ecmascript",
+  "apiversion": 2,
+  "id": "opensubtitles",
+  "file": "opensubtitles.js",
+  "version": "0.0.1",
+  "title": "OpenSubtitles",
+  "icon": "logo.png",
+  "author": "Movian community",
+  "category": "subtitles",
+  "synopsis": "Subtitles from OpenSubtitles.com",
+  "description": "<p>Search and download subtitles from OpenSubtitles.com (API v1).</p><p>Get a free API key at <a href=\"https://www.opensubtitles.com/en/consumers\">opensubtitles.com/en/consumers</a>. Optional login raises the daily download limit.</p>",
+  "homepage": "https://www.opensubtitles.com",
+  "showtimeVersion": "5.0.0"
+}
